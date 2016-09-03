@@ -4,8 +4,8 @@ program wp;
 {$R *.res}
 
 uses
-  System.SysUtils, RegularExpressions, System.Types, IdHTTP, UrlMon,
-  ActiveX, System.StrUtils, System.Classes;
+  System.SysUtils, RegularExpressions, System.Types, UrlMon,
+  ActiveX, System.StrUtils, System.Classes, WinInet;
 
 const
   RES = '1680x1050';
@@ -13,24 +13,10 @@ const
 
 var
   CoResult, i: Integer;
-  HTTP: TIdHTTP;
-  Query: String;
+  Url: String;
   regexpr: TRegEx;
   match: TMatch;
   token: TStringDynArray;
-
-function Occurrences(const Substring, Text: string): Integer;
-var
-  offset: Integer;
-begin
-  result := 0;
-  offset := PosEx(Substring, Text, 1);
-  while offset <> 0 do
-  begin
-    inc(result);
-    offset := PosEx(Substring, Text, offset + length(Substring));
-  end;
-end;
 
 function wallpaper_get_url(AWp_id, ABase, ARes: string): String;
 begin
@@ -39,21 +25,40 @@ begin
 end;
 
 function grab_page(AIndex: Integer): String;
+  var
+  NetHandle: HINTERNET;
+  UrlHandle: HINTERNET;
+  Buffer: array[0..1023] of byte;
+  BytesRead: dWord;
+  StrBuffer: UTF8String;
 begin
-  Query := Format
+  Result := '';
+
+  Url := Format
     ('https://interfacelift.com/wallpaper/downloads/date/any/index%d.html', [AIndex]);
 
-  CoResult := CoInitializeEx(nil, COINIT_MULTITHREADED);
+  NetHandle := InternetOpen('Delphi 2009', INTERNET_OPEN_TYPE_PRECONFIG, nil, nil, 0);
 
-  if not((CoResult = S_OK) or (CoResult = S_FALSE)) then
-  begin
-    Writeln('Failed to initialize COM library.');
-    Exit;
-  end;
-
-  HTTP := TIdHTTP.Create;
-
-  result := HTTP.Get(Query);
+  if Assigned(NetHandle) then
+    try
+      UrlHandle := InternetOpenUrl(NetHandle, PChar(Url), nil, 0, INTERNET_FLAG_RELOAD, 0);
+      if Assigned(UrlHandle) then
+        try
+          repeat
+            InternetReadFile(UrlHandle, @Buffer, SizeOf(Buffer), BytesRead);
+            SetString(StrBuffer, PAnsiChar(@Buffer[0]), BytesRead);
+            Result := Result + StrBuffer;
+          until BytesRead = 0;
+        finally
+          InternetCloseHandle(UrlHandle);
+        end
+      else
+        raise Exception.CreateFmt('Cannot open URL %s', [Url]);
+    finally
+      InternetCloseHandle(NetHandle);
+    end
+  else
+    raise Exception.Create('Unable to initialize Wininet');
 end;
 
 procedure download_file(AUrl: String);
@@ -61,7 +66,6 @@ var
   Path: String;
   FileName: String;
   List: TStringDynArray;
-  IdHTTP1: TIdHTTP;
   Stream: TMemoryStream;
 begin
   Path := (ExtractFilePath(ParamStr(0)) + 'downloads/');
